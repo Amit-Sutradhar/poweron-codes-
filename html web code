@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poweron Enertech Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+<style>
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background: linear-gradient(135deg, #4f6cbe, #122666);
+    color: rgb(255, 255, 255);
+}
+
+/* ================= HEADER ================= */
+
+.header {
+    display: flex;
+    align-items: center;
+    padding: 15px 25px;
+    background: #589bff;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.logo-area {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-area img {
+    height: 50px; /* 🔥 Adjust logo size here */
+    width: auto;
+}
+
+.company-name {
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.subtitle {
+    font-size: 13px;
+    opacity: 0.7;
+}
+
+/* ================= DASHBOARD GRID ================= */
+
+.dashboard {
+    display: grid;
+    gap: 20px;
+    padding: 20px;
+}
+
+/* Desktop */
+@media (min-width: 1200px) {
+    .dashboard {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* Tablet */
+@media (min-width: 768px) and (max-width: 1199px) {
+    .dashboard {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Mobile */
+@media (max-width: 767px) {
+    .dashboard {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ================= CARD ================= */
+
+.card {
+    background: #1e293b;
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+}
+
+.card h3 {
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.big-value {
+    font-size: 26px;
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+
+/* Chart wrapper */
+.chart-wrapper {
+    position: relative;
+    height: 180px;
+}
+
+/* Map full width */
+.map-container {
+    grid-column: 1 / -1;
+    height: 320px;
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+iframe {
+    border: 0;
+}
+
+/* Small responsive fix */
+@media (max-width: 500px) {
+    .company-name {
+        font-size: 16px;
+    }
+
+    .big-value {
+        font-size: 22px;
+    }
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="header">
+    <div class="logo-area">
+        <img src="logo.png" alt="Logo">
+        <div>
+            <div class="company-name">Poweron Enertech</div>
+            <div class="subtitle">Smart Energy Monitoring System</div>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard">
+
+    <div class="card">
+        <h3>Voltage</h3>
+        <div class="big-value" id="voltage">-- V</div>
+        <div class="chart-wrapper">
+            <canvas id="voltageChart"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Current</h3>
+        <div class="big-value" id="current">-- A</div>
+        <div class="chart-wrapper">
+            <canvas id="currentChart"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Power</h3>
+        <div class="big-value" id="power">-- W</div>
+        <div class="chart-wrapper">
+            <canvas id="powerChart"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Energy</h3>
+        <div class="big-value" id="energy">-- kWh</div>
+    </div>
+
+    <div class="card">
+        <h3>Frequency</h3>
+        <div class="big-value" id="frequency">-- Hz</div>
+    </div>
+
+    <div class="card">
+        <h3>Power Factor</h3>
+        <div class="big-value" id="pf">--</div>
+    </div>
+
+    <div class="card">
+        <h3>Temperature</h3>
+        <div class="big-value" id="temperature">-- °C</div>
+    </div>
+
+    <div class="card">
+        <h3>Status</h3>
+        <div class="big-value">ONLINE</div>
+    </div>
+
+    <div class="map-container">
+        <iframe
+            width="100%"
+            height="100%"
+            src="https://maps.google.com/maps?q=18.877936,73.166734&z=15&output=embed">
+        </iframe>
+    </div>
+
+</div>
+
+<script>
+
+const channelID = "2628471";
+const readAPI = "0ET63BF5CN6121MF";
+
+let voltageChart, currentChart, powerChart;
+
+async function loadData() {
+
+    const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPI}&results=20`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const feeds = data.feeds;
+
+    if (!feeds || feeds.length === 0) return;
+
+    const latest = feeds[feeds.length - 1];
+
+    document.getElementById("voltage").innerText = latest.field1 + " V";
+    document.getElementById("current").innerText = latest.field2 + " A";
+    document.getElementById("power").innerText = latest.field3 + " W";
+    document.getElementById("energy").innerText = latest.field4 + " kWh";
+    document.getElementById("frequency").innerText = latest.field5 + " Hz";
+    document.getElementById("pf").innerText = latest.field6;
+    document.getElementById("temperature").innerText = latest.field7 + " °C";
+
+    let labels = feeds.map(f => new Date(f.created_at).toLocaleTimeString());
+
+    updateChart(voltageChart, labels, feeds.map(f => f.field1));
+    updateChart(currentChart, labels, feeds.map(f => f.field2));
+    updateChart(powerChart, labels, feeds.map(f => f.field3));
+}
+
+function createChart(ctx) {
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                data: [],
+                borderColor: "#38bdf8",
+                borderWidth: 2,
+                fill: false,
+                tension: 0.3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { display: false } }
+        }
+    });
+}
+
+function updateChart(chart, labels, data) {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = data;
+    chart.update();
+}
+
+window.onload = function() {
+    voltageChart = createChart(document.getElementById("voltageChart"));
+    currentChart = createChart(document.getElementById("currentChart"));
+    powerChart = createChart(document.getElementById("powerChart"));
+    loadData();
+    setInterval(loadData, 15000);
+};
+
+</script>
+
+</body>
+</html>
