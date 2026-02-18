@@ -1,0 +1,173 @@
+#include <WiFi.h>
+#include <ThingSpeak.h>
+#include <PZEM004Tv30.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Wire.h>
+#include <Adafruit_ADS1X15.h>
+
+// ================= WIFI =================
+const char* ssid = "POWERON";
+const char* password = "Factory@E35";
+
+// ================= THINGSPEAK ==========
+unsigned long myChannelNumber = 2628471;
+const char* myWriteAPIKey = "6UF1AG9DGRFFKVVO";
+WiFiClient client;
+
+// ================= ESP32 I2C ===========
+#define SDA_PIN 20
+#define SCL_PIN 21
+
+// ================= TCA / ADS ===========
+#define TCA_ADDR 0x70
+#define ADS_ADDR 0x48
+Adafruit_ADS1115 ads;
+
+// ================= PZEM UART ===========
+#define PZEM_RX_PIN 17
+#define PZEM_TX_PIN 18
+PZEM004Tv30 pzem(Serial2, PZEM_RX_PIN, PZEM_TX_PIN);
+
+// ================= DS18B20 =============
+#define ONE_WIRE_BUS 4
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+// ================= TCA SELECT ==========
+void tcaSelect(uint8_t channel) {
+  if (channel > 7) return;
+  Wire.beginTransmission(TCA_ADDR);
+  Wire.write(1 << channel);
+  Wire.endTransmission();
+}
+
+// ================= LEAKAGE CAL =========
+const float voltTable[] = {
+  0.000, 0.124, 0.135, 0.148, 0.165, 0.186, 0.213,0.250, 0.350, 0.367,  0.449, 0.482
+};
+
+const float currTable[] = {
+  0.0,    30,    33,      37,    42, 49,      57,  68,   83,    104,      129,   140
+};
+
+const int tableSize = sizeof(voltTable) / sizeof(voltTable[0]);
+
+float voltageToCurrent(float v) {
+  if (v <= voltTable[0]) return currTable[0];
+  if (v >= voltTable[tableSize - 1]) return currTable[tableSize - 1];
+
+  for (int i = 0; i < tableSize - 1; i++) {
+    if (v >= voltTable[i] && v <= voltTable[i + 1]) {
+      float slope =
+        (currTable[i + 1] - currTable[i]) /
+        (voltTable[i + 1] - voltTable[i]);
+      return currTable[i] + slope * (v - voltTable[i]);
+    }
+  }
+  return 0.0;
+}
+
+// ================= SETUP ================
+void setup() {
+  Serial.begin(115200);
+  delay(2000);
+
+  Serial.println("================================");
+  Serial.println(" ESP32 POWER + LEAKAGE MONITOR ");
+  Serial.println("================================");
+
+  // I2C
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  // TCA check
+  Wire.beginTransmission(TCA_ADDR);
+  if (Wire.endTransmission() != 0) {
+    Serial.println("❌ TCA9548A NOT FOUND");
+    while (1);
+  }
+
+  tcaSelect(0);
+  if (!ads.begin(ADS_ADDR)) {
+    Serial.println("❌ ADS1115 NOT FOUND");
+    while (1);
+  }
+
+  ads.setGain(GAIN_ONE);   // 0–3.3V safe
+
+  // UART PZEM
+  Serial2.begin(9600, SERIAL_8N1, PZEM_RX_PIN, PZEM_TX_PIN);
+
+  // DS18B20
+  sensors.begin();
+
+  // WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nWiFi Connected");
+  ThingSpeak.begin(client);
+}
+
+// ================= LOOP =================
+void loop() {
+
+  // ---------- PZEM ----------
+  float voltage   = pzem.voltage();
+  float current   = pzem.current();
+  float power     = pzem.power();
+  float energy    = pzem.energy();
+  float frequency = pzem.frequency();
+  float pf        = pzem.pf();
+
+  // ---------- TEMP ----------
+  sensors.requestTemperatures();
+  float temperature = sensors.getTempCByIndex(0);
+
+  // ---------- LEAKAGE ----------
+  float leakage[4];
+  tcaSelect(0);
+
+  for (int ch = 0; ch < 4; ch++) {
+    int16_t raw = ads.readADC_SingleEnded(ch);
+    if (raw < 0) raw = 0;
+    float v = ads.computeVolts(raw);
+    leakage[ch] = voltageToCurrent(v);
+
+    Serial.print("Leak A");
+    Serial.print(ch);
+    Serial.print(": ");
+    Serial.print(leakage[ch], 3);
+    Serial.println(" mA");
+  }
+
+  // ---------- SERIAL ----------
+  Serial.println("PZEM DATA:");
+  Serial.print("V: "); Serial.println(voltage);
+  Serial.print("I: "); Serial.println(current);
+  Serial.print("P: "); Serial.println(power);
+  Serial.print("E: "); Serial.println(energy);
+  Serial.print("F: "); Serial.println(frequency);
+  Serial.print("PF: "); Serial.println(pf);
+  Serial.print("Temp: "); Serial.println(temperature);
+  Serial.println("----------------------------");
+
+  // ---------- THINGSPEAK ----------
+  ThingSpeak.setField(1, voltage);
+  ThingSpeak.setField(2, current);
+  ThingSpeak.setField(3, power);
+  ThingSpeak.setField(4, energy);
+  ThingSpeak.setField(5, frequency);
+  ThingSpeak.setField(6, pf);
+  ThingSpeak.setField(7, temperature);
+  ThingSpeak.setField(8, leakage[0]);   // only one leakage (limit)
+
+  int status = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+  Serial.println(status == 200 ? "ThingSpeak OK" : "ThingSpeak FAIL");
+
+  delay(10000);  // ThingSpeak rule
+}
